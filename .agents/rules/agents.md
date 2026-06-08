@@ -14,33 +14,25 @@ Welcome to the Dynamic Agent Planning and Development Guide. This file establish
 
 
 
-\## 1. Environment \& Setup
+\## 1. Environment & Setup
 
+### 🔄 Dynamic Planning Phase
+*Before executing any setup procedures, the AI agent must analyze the repository context and prompt the user with targeted questions to determine:*
+1. The specific agent platform or integration framework required.
+2. The preferred package manager, runtime environment, and workspace structure.
+3. The messaging architecture (e.g., real-time streaming, webhooks, or polling loops).
+4. The model pathway setup:
+   - **Fixed-Model setup** (e.g., a single predefined local model like Ollama or a single direct API provider).
+   - **Configurable-Model setup** (supporting dynamic switching between multiple model providers via LiteLLM).
 
+> **Agent Note:** Log the generated questions and user decisions directly below this block before proceeding.
 
-\### 🔄 Dynamic Planning Phase
-
-\*Before executing any setup procedures, the AI agent must analyze the repository context and prompt the user with targeted questions to determine:\*
-
-1\. The specific agent platform or integration framework required.
-
-2\. The preferred package manager, runtime environment, and workspace structure.
-
-3\. The messaging architecture (e.g., real-time streaming, webhooks, or polling loops).
-
-
-
-> \*\*Agent Note:\*\* Log the generated questions and user decisions directly below this block before proceeding.
-
-
-
-\### 📋 Setup Instructions
-
-\- \*\*Dependency Isolation:\*\* Ensure all project dependencies match the framework determined during the planning phase. Pin version numbers strictly to prevent breaking changes in third-party API clients.
-
-\- \*\*Workspace Integration:\*\* For monorepos, run the platform-specific installation command from the workspace root to expose new packages to your compiler, linter, and build tools.
-
-\- \*\*Environment Configuration:\*\* Copy the baseline environment template to a localized `.env` file. Populate necessary credentials, API tokens, or session configurations without exposing them to source control.
+### 📋 Setup Instructions
+- **Dependency Isolation:** Ensure all project dependencies match the framework determined during the planning phase. Pin version numbers strictly to prevent breaking changes in third-party API clients.
+- **Workspace Integration:** For monorepos, run the platform-specific installation command from the workspace root to expose new packages to your compiler, linter, and build tools.
+- **Environment Configuration:** Copy the baseline environment template to a localized `.env` file. Populate necessary credentials, API tokens, or session configurations without exposing them to source control.
+  - **Fixed-Model pathway:** Ensure the specific host/model configuration variables are specified (e.g. `OLLAMA_BASE_URL`).
+  - **Configurable-Model pathway:** Add an `ACTIVE_MODEL` selection variable and placeholder keys for all required model providers (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 
 
@@ -58,9 +50,11 @@ Welcome to the Dynamic Agent Planning and Development Guide. This file establish
 
 1\. The memory strategy to mimic user style (e.g., Few-Shot prompting patterns or dynamic Retrieval-Augmented Generation / RAG).
 
-2\. The core language model orchestrator (e.g., cloud-based APIs or fully local model deployments).
+2\. The core language model orchestrator (e.g., cloud-based APIs, local model deployments, or a multi-provider configurable setup).
 
-3\. The source data format available for training or style injection.
+3\. The specific model providers and API key strategy (e.g., if using a Configurable-Model setup, which API keys/environment variables are needed).
+
+4\. The source data format available for training or style injection.
 
 
 
@@ -69,6 +63,14 @@ Welcome to the Dynamic Agent Planning and Development Guide. This file establish
 
 
 \### 🧠 Architectural Rules
+
+\- \*\*Model Orchestration Pathways:\*\*
+
+  \- \*\*Fixed-Model Pathway:\*\* Use direct, provider-specific libraries or local endpoints (e.g., Ollama or a direct provider SDK) for a dedicated configuration.
+
+  \- \*\*Configurable-Model Pathway (LiteLLM):\*\* Transition `agent.py` to be model-agnostic by using a universal wrapper like `litellm` instead of hardcoded client libraries. Support dynamic model switching (e.g., Anthropic, OpenAI, Gemini, Xiaomi, etc.) via the `ACTIVE_MODEL` configuration variable.
+
+\- \*\*Dynamic Startup Validation:\*\* For Configurable-Model setups, implement a startup check mapping the active model to its required API key environment variable. Validate that the key exists before initiating client calls, raising a descriptive initialization error if missing.
 
 \- \*\*Data Parsing:\*\* Utilize a dedicated history parser module to clean input logs, converting raw exported formats into standardized message-and-response token chains.
 
@@ -105,6 +107,7 @@ Welcome to the Dynamic Agent Planning and Development Guide. This file establish
 \- \*\*Targeted Test Execution:\*\* Run the workspace-specific unit testing suite filtered to the modified agent module to confirm baseline logic compliance.
 
 \- \*\*Behavioral Isolation:\*\* Mock all third-party external network dependencies—including live LLM API calls and social media platform login workflows—using local fixtures to guarantee deterministic test runs.
+  \- **Configurable-Model pathway:** Ensure that unit tests mock the universal wrapper (e.g., `litellm.completion`) rather than individual provider SDKs, to keep test runs fully offline and deterministic.
 
 \- \*\*Static Verification:\*\* Execute full linting and static typing validation passes across modified agent directories to prevent runtime exceptions caused by unvalidated payload structures.
 
