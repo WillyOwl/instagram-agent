@@ -14,8 +14,11 @@ graph TD
     C -->|Yes| E[Retrieve DM Text]
     E -->|Query/Retrieve Context| F(agent.py)
     G[(Local RAG Index)] -.->|Search Similar Exchanges| F
-    F -->|Enriched Prompt| H[Ollama LLM / llama3]
-    H -->|Generate Style-Matched Reply| F
+    F -->|Enriched Prompt| F_dispatch{ACTIVE_MODEL set?}
+    F_dispatch -->|Yes| H_configurable[LiteLLM wrapper / API]
+    F_dispatch -->|No| H_fixed[Ollama LLM / llama3]
+    H_configurable -->|Generate Style-Matched Reply| F
+    H_fixed -->|Generate Style-Matched Reply| F
     F -->|Return Reply Text| B
     B -->|Send DM w/ Jitter Delay| A
 ```
@@ -24,8 +27,11 @@ graph TD
 
 ## Key Features
 
+- **Flexible Model Pathways**:
+  - **Fixed-Model Pathway (Ollama)** (default): Fully local, offline setup using Ollama (e.g. `llama3` and `nomic-embed-text`).
+  - **Configurable-Model Pathway (LiteLLM)**: Model-agnostic pathway supporting dynamic model switching (e.g. OpenAI, Anthropic, Gemini, Xiaomi MiMo, etc.) via environment variables.
 - **Local RAG-Powered Personalization**: Automatically parses your exported Instagram chat history to index past exchanges. Retrieves the top-5 most similar past conversations and injects them as style examples in the LLM prompt.
-- **Tone & Style Matching**: Uses a local model via Ollama to reply exactly as you would—matching your language, vocabulary, length, and emoji habits.
+- **Tone & Style Matching**: Matches your language, vocabulary, length, and emoji habits from retrieved examples.
 - **Fail-Safe Whitelisting**: Strict opt-in control. The agent will **never** reply to anyone unless their username is explicitly added to the whitelist in your configuration.
 - **Instagram Security Best Practices**:
   - **Session Caching**: Reuses a serialized session JSON payload (`.instagram_session.json`) to avoid repeated logins that trigger automated account blocks.
@@ -40,7 +46,9 @@ graph TD
 - **Core Logic**: Python 3.10+
 - **Instagram API**: Unofficial client wrapper ([instagrapi](https://github.com/adw0rd/instagrapi))
 - **Orchestration & Indexing**: [LlamaIndex](https://www.llamaindex.ai/)
-- **LLM/Embeddings Platform**: [Ollama](https://ollama.com/) (`llama3` & `nomic-embed-text`)
+- **Local LLM/Embeddings Platform**: [Ollama](https://ollama.com/)
+- **Universal LLM Wrapper**: [LiteLLM](https://docs.litellm.ai/)
+
 
 ---
 
@@ -72,11 +80,24 @@ Copy the template `.env.example` file to `.env`:
 cp .env.example .env
 ```
 Fill in the configuration parameters in `.env`:
-- `INSTAGRAM_USERNAME`: Your Instagram username.
-- `INSTAGRAM_PASSWORD`: Your Instagram password.
-- `SENDER_WHITELIST`: Comma-separated list of Instagram bundles (e.g., `alice,bob`) allowed to receive replies. **Leave blank to disable auto-replies completely (safe default).**
-- `HISTORY_PATH`: The relative or absolute path to the `messages/` folder containing your chat history.
-- `POLL_INTERVAL_SECONDS`: The base interval (in seconds) between inbox checks (default is `45`).
+- **Instagram Credentials**:
+  - `INSTAGRAM_USERNAME`: Your Instagram username.
+  - `INSTAGRAM_PASSWORD`: Your Instagram password.
+  - `SENDER_WHITELIST`: Comma-separated list of Instagram usernames (e.g., `alice,bob`) allowed to receive replies. **Leave blank to disable auto-replies completely (safe default).**
+- **Model Pathways & API Keys**:
+  - **Fixed-Model Pathway**:
+    - `FIXED_MODEL_PROVIDER`: Selects the fixed-model backend (default: `ollama`).
+    - `OLLAMA_BASE_URL`: The local URL of your Ollama server.
+    - `OLLAMA_MODEL`: The LLM name (default: `llama3`).
+    - `OLLAMA_EMBED_MODEL`: The local embedding model (default: `nomic-embed-text`).
+  - **Configurable-Model Pathway (LiteLLM)**:
+    - `ACTIVE_MODEL`: Set this to use LiteLLM instead of the fixed Ollama backend (e.g. `gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-pro`, `xiaomi_mimo/mimo-v2.5`). Leave blank to use the Fixed-Model pathway.
+    - `ACTIVE_EMBED_MODEL`: Optional. Set this to use a switchable LiteLLM embedding model (e.g. `text-embedding-3-small`). Leave blank to fall back to local Ollama embeddings (which is required for providers like Xiaomi MiMo that do not offer embedding variants).
+    - `ACTIVE_API_BASE`: Optional. Overrides the default base URL for custom providers or specific regional subscription plans (e.g., `https://token-plan-cn.xiaomimimo.com/v1` for Xiaomi Token Plans).
+    - **API Keys**: Add corresponding keys for your active providers: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XIAOMI_MIMO_API_KEY`.
+- **System Settings**:
+  - `HISTORY_PATH`: The relative or absolute path to the `messages/` folder containing your chat history.
+  - `POLL_INTERVAL_SECONDS`: The base interval (in seconds) between inbox checks (default is `45`).
 
 ---
 
