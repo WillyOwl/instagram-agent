@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import logging
 import time
-from typing import Optional, cast
+from typing import Optional, cast, Any
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever
@@ -52,18 +52,49 @@ class Agent:
 
     def __init__(self) -> None:
         logger.info("Initialising agent — loading chat history …")
+        self._active_model: str | None
 
-        # Use Ollama's embedding model so indexing is also fully local.
-        embed_model = OllamaEmbedding(
-            model_name=config.OLLAMA_EMBED_MODEL,
-            base_url=config.OLLAMA_BASE_URL,
-        )
+        if config.ACTIVE_MODEL and config.ACTIVE_EMBED_MODEL:
+            # Configurable-Model path with switchable embeddings
+            required_embed_key = config.get_required_key_for_model(config.ACTIVE_EMBED_MODEL)
+            if required_embed_key and not os.getenv(required_embed_key):
+                raise EnvironmentError(
+                    f"Required API key '{required_embed_key}' for embedding model '{config.ACTIVE_EMBED_MODEL}' is not set in environment."
+                )
+            from llama_index.embeddings.litellm import LiteLLMEmbedding
+            embed_model = LiteLLMEmbedding(
+                model_name=config.ACTIVE_EMBED_MODEL,
+            )
+        else:
+            # All other cases → Ollama embeddings (local)
+            embed_model = OllamaEmbedding(
+                model_name=config.OLLAMA_EMBED_MODEL,
+                base_url=config.OLLAMA_BASE_URL,
+            )
 
-        self._llm = Ollama(
-            model=config.OLLAMA_MODEL,
-            base_url=config.OLLAMA_BASE_URL,
-            request_timeout=60.0,
-        )
+        if config.ACTIVE_MODEL:
+            # Configurable-Model path
+            required_key = config.get_required_key_for_model(config.ACTIVE_MODEL)
+            if required_key and not os.getenv(required_key):
+                raise EnvironmentError(
+                    f"Required API key '{required_key}' for model '{config.ACTIVE_MODEL}' is not set in environment."
+                )
+            self._active_model = config.ACTIVE_MODEL
+            self._llm = None
+        else:
+            # Fixed-Model path — dispatched by FIXED_MODEL_PROVIDER
+            if config.FIXED_MODEL_PROVIDER == "ollama":
+                self._llm = Ollama(
+                    model=config.OLLAMA_MODEL,
+                    base_url=config.OLLAMA_BASE_URL,
+                    request_timeout=60.0,
+                )
+            else:
+                raise NotImplementedError(
+                    f"Fixed-model provider '{config.FIXED_MODEL_PROVIDER}' is not yet implemented. "
+                    "Currently supported: 'ollama'."
+                )
+            self._active_model = None
 
         from llama_index.core import StorageContext, load_index_from_storage
 
@@ -132,17 +163,35 @@ class Agent:
 
         for attempt in (1, 2):
             try:
-                response = self._llm.complete(prompt)
-                reply = str(response).strip()
+                if self._active_model:
+                    import litellm
+                    completion_kwargs: dict[str, Any] = {
+                        "model": self._active_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                    }
+                    req_key = config.get_required_key_for_model(self._active_model)
+                    if req_key:
+                        completion_kwargs["api_key"] = os.getenv(req_key)
+                    if config.ACTIVE_API_BASE:
+                        completion_kwargs["api_base"] = config.ACTIVE_API_BASE
+
+                    response = litellm.completion(**completion_kwargs)
+                    reply = response.choices[0].message.content.strip()
+                else:
+                    if not self._llm:
+                        raise RuntimeError("LLM is not initialized.")
+                    response = self._llm.complete(prompt)
+                    reply = str(response).strip()
+
                 if reply:
                     logger.info(
                         "Reply generated (attempt %d): %r", attempt, reply[:80]
                     )
                     return reply
-                logger.warning("Empty response from Ollama on attempt %d.", attempt)
+                logger.warning("Empty response from model on attempt %d.", attempt)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "Ollama call failed on attempt %d: %s", attempt, exc
+                    "Model call failed on attempt %d: %s", attempt, exc
                 )
 
             if attempt == 1:

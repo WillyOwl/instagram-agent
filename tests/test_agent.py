@@ -6,10 +6,22 @@ so tests run offline and instantaneously.
 
 from __future__ import annotations
 
+import os
+import pytest
 from unittest.mock import MagicMock, patch
 
 from agent import Agent
 
+
+@pytest.fixture(autouse=True)
+def reset_config_for_testing():
+    with (
+        patch("config.ACTIVE_MODEL", None),
+        patch("config.ACTIVE_EMBED_MODEL", None),
+        patch("config.ACTIVE_API_BASE", None),
+        patch("config.FIXED_MODEL_PROVIDER", "ollama"),
+    ):
+        yield
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -204,3 +216,238 @@ class TestGenerateReply:
             agent.generate_reply("안녕하세요")
             prompt = mock_complete.call_args[0][0]
             assert "안녕하세요" in prompt
+
+
+# ── Configurable-Model & Provider Tests ──────────────────────────────────────
+
+class TestAgentInitConfigurableModel:
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    def test_raises_if_api_key_missing(
+        self,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        """EnvironmentError should be raised if the required API key for ACTIVE_MODEL is missing."""
+        temp_env = os.environ.copy()
+        temp_env.pop("ANTHROPIC_API_KEY", None)
+        with (
+            patch("config.ACTIVE_MODEL", "anthropic/claude-3-5-sonnet"),
+            patch.dict(os.environ, temp_env, clear=True),
+        ):
+            from agent import Agent
+            with pytest.raises(EnvironmentError) as exc_info:
+                Agent()
+            assert "Required API key 'ANTHROPIC_API_KEY'" in str(exc_info.value)
+
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    def test_init_succeeds_with_key_set(
+        self,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        with (
+            patch("config.ACTIVE_MODEL", "anthropic/claude-3-5-sonnet"),
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}),
+        ):
+            from agent import Agent
+            agent = Agent()
+            assert agent._active_model == "anthropic/claude-3-5-sonnet"
+            assert agent._llm is None
+
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    def test_xiaomi_raises_if_key_missing(
+        self,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        temp_env = os.environ.copy()
+        temp_env.pop("XIAOMI_MIMO_API_KEY", None)
+        with (
+            patch("config.ACTIVE_MODEL", "xiaomi_mimo/mimo-v2.5"),
+            patch.dict(os.environ, temp_env, clear=True),
+        ):
+            from agent import Agent
+            with pytest.raises(EnvironmentError) as exc_info:
+                Agent()
+            assert "Required API key 'XIAOMI_MIMO_API_KEY'" in str(exc_info.value)
+
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    @patch("llama_index.embeddings.litellm.LiteLLMEmbedding")
+    def test_init_succeeds_with_configurable_embed(
+        self,
+        mock_litellm_embed: MagicMock,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        with (
+            patch("config.ACTIVE_MODEL", "gpt-4"),
+            patch("config.ACTIVE_EMBED_MODEL", "text-embedding-3-small"),
+            patch.dict(os.environ, {"OPENAI_API_KEY": "fake-openai-key"}),
+        ):
+            from agent import Agent
+            agent = Agent()
+            assert agent._active_model == "gpt-4"
+            mock_litellm_embed.assert_called_once_with(model_name="text-embedding-3-small")
+
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    def test_init_raises_if_embed_key_missing(
+        self,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        temp_env = os.environ.copy()
+        temp_env.pop("OPENAI_API_KEY", None)
+        temp_env["GEMINI_API_KEY"] = "fake-gemini-key"
+        with (
+            patch("config.ACTIVE_MODEL", "gemini/gemini-pro"),
+            patch("config.ACTIVE_EMBED_MODEL", "text-embedding-3-small"),
+            patch.dict(os.environ, temp_env, clear=True),
+        ):
+            from agent import Agent
+            with pytest.raises(EnvironmentError) as exc_info:
+                Agent()
+            assert "Required API key 'OPENAI_API_KEY' for embedding model" in str(exc_info.value)
+
+
+class TestGenerateReplyConfigurableModel:
+    def _build_agent(
+        self,
+        retrieved_nodes: list,
+    ) -> "Agent":
+        with (
+            patch("agent.os.path.exists", return_value=False),
+            patch("agent.load_history", return_value=[]),
+            patch("agent.VectorStoreIndex"),
+            patch("agent.VectorIndexRetriever") as mock_retriever_cls,
+            patch("agent.OllamaEmbedding"),
+        ):
+            mock_retriever = MagicMock()
+            mock_retriever.retrieve.return_value = retrieved_nodes
+            mock_retriever_cls.return_value = mock_retriever
+
+            with (
+                patch("config.ACTIVE_MODEL", "xiaomi_mimo/mimo-v2.5"),
+                patch.dict(os.environ, {"XIAOMI_MIMO_API_KEY": "fake-key"}),
+            ):
+                from agent import Agent
+                agent = Agent()
+                agent._retriever = mock_retriever
+                return agent
+
+    @patch("litellm.completion")
+    def test_litellm_called_not_ollama(
+        self,
+        mock_completion: MagicMock,
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Xiaomi reply!"
+        mock_completion.return_value = mock_response
+
+        agent = self._build_agent([])
+        result = agent.generate_reply("Hi")
+        assert result == "Xiaomi reply!"
+        mock_completion.assert_called_once()
+        assert agent._llm is None
+
+    @patch("agent.time.sleep")
+    @patch("litellm.completion")
+    def test_retry_on_litellm_failure(
+        self,
+        mock_completion: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Retry reply!"
+        mock_completion.side_effect = [RuntimeError("LiteLLM timeout"), mock_response]
+
+        agent = self._build_agent([])
+        result = agent.generate_reply("Hi")
+        assert result == "Retry reply!"
+        assert mock_completion.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch("agent.time.sleep")
+    @patch("litellm.completion")
+    def test_two_litellm_failures_returns_none(
+        self,
+        mock_completion: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        mock_completion.side_effect = RuntimeError("persistent LiteLLM error")
+
+        agent = self._build_agent([])
+        result = agent.generate_reply("Hi")
+        assert result is None
+        assert mock_completion.call_count == 2
+
+
+class TestAgentInitFixedModelProvider:
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    @patch("agent.Ollama")
+    def test_unknown_provider_raises(
+        self,
+        mock_ollama: MagicMock,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        with (
+            patch("config.ACTIVE_MODEL", None),
+            patch("config.FIXED_MODEL_PROVIDER", "unknown-provider"),
+        ):
+            from agent import Agent
+            with pytest.raises(NotImplementedError) as exc_info:
+                Agent()
+            assert "Fixed-model provider 'unknown-provider' is not yet implemented" in str(exc_info.value)
+
+    @patch("agent.load_history", return_value=[])
+    @patch("agent.VectorStoreIndex")
+    @patch("agent.VectorIndexRetriever")
+    @patch("agent.OllamaEmbedding")
+    @patch("agent.Ollama")
+    def test_ollama_provider_is_default(
+        self,
+        mock_ollama: MagicMock,
+        mock_embed: MagicMock,
+        mock_retriever_cls: MagicMock,
+        mock_index_cls: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        with (
+            patch("config.ACTIVE_MODEL", None),
+            patch("config.FIXED_MODEL_PROVIDER", "ollama"),
+        ):
+            from agent import Agent
+            agent = Agent()
+            assert agent._active_model is None
+            mock_ollama.assert_called_once()
+
